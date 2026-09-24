@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=AirMedia Share
+GenericName=Wireless presentation
+Comment=Show your screen, a window, and its sound on a Crestron AirMedia TV
+Exec=@BIN@
+Icon=video-display
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=AirMedia;Crestron;share;screen;mirror;present;presentation;TV;cast;office;
+StartupNotify=true
+StartupWMClass=airmedia-share
+Actions=stop;check;
+
+[Desktop Action stop]
+Name=Stop sharing
+Exec=@BIN@ --stop
+
+[Desktop Action check]
+Name=Run self-check
+Exec=@BIN@ --check-report

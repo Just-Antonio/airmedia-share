@@ -1,0 +1,30 @@
+#!/bin/sh
+# AirMedia Share launcher, installed to ~/.local/bin by install.sh.
+#   airmedia-share            open the app (or raise it if already open)
+#   airmedia-share --stop     stop sharing
+#   airmedia-share --check    self-test (add --deep to handshake with each TV)
+# Log: ~/.cache/airmedia-share/sender.log
+APP_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/airmedia-share"
+PY="$APP_HOME/venv/bin/python"
+
+# Only the app's venv and the system's GTK bindings; never ~/.local/lib/python3.*,
+# whose unrelated upgrades once broke this app silently.
+export PYTHONNOUSERSITE=1
+export PYTHONPATH="$APP_HOME/lib"
+
+broken() {
+    msg="AirMedia Share's Python environment needs a repair (this usually follows an Ubuntu upgrade).
+
+Run this in a terminal:
+    $APP_HOME/install.sh --repair"
+    echo "$msg" >&2
+    zenity --error --title="AirMedia Share" --no-wrap --text="$msg" 2>/dev/null \
+        || notify-send "AirMedia Share" "$msg" 2>/dev/null
+    exit 1
+}
+
+[ -x "$PY" ] && "$PY" -c "" 2>/dev/null || broken
+"$PY" -m airmedia_share "$@"
+status=$?
+[ "$status" -eq 3 ] && broken
+exit "$status"

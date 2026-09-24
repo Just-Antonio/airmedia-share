@@ -1,0 +1,17 @@
+# Exact versions this was verified with against an AM-3200 (2026-09-24).
+# install.sh installs these into a private venv; bump deliberately and re-test.
+aioice==0.10.2
+aiortc==1.15.0
+av==17.1.0
+cffi==2.1.1
+cryptography==50.0.1
+dnspython==2.8.0
+google-crc32c==1.8.0
+ifaddr==0.2.0
+numpy==2.2.6
+pycparser==3.0
+pyee==13.0.1
+pylibsrtp==1.0.0
+pyOpenSSL==26.4.0
+typing_extensions==4.16.0
+websockets==16.1.1

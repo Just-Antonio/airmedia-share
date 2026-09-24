@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# Your rooms' TVs: kept out of the public repo (see README, "Site TVs").
+site.json
