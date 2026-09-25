@@ -163,6 +163,14 @@ receiver behaviors that were learned the hard way (see
 should fail there first. Bump the pins in `requirements.txt` deliberately, then test
 against a real receiver.
 
+## Support
+
+This is free and MIT licensed — nothing here is gated behind sponsoring it. If it saved
+you from fighting with AirMedia and you'd like to support the work anyway, you can
+sponsor it via the **Sponsor** button on this page.
+
+(A Buy Me a Coffee link will go here once one exists.)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

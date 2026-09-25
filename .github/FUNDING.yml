@@ -1,0 +1,6 @@
+# Enables the "Sponsor" button on the repo page (GitHub only shows it once the
+# listed account has an active GitHub Sponsors profile at github.com/sponsors).
+github: [Just-Antonio]
+
+# Uncomment once a Buy Me a Coffee page exists (buymeacoffee.com/<username>):
+# buy_me_a_coffee: <username>
