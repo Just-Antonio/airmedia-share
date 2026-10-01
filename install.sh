@@ -42,7 +42,8 @@ for pkg in python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-wnck-3.0 gir1.2-notify-
         || missing+=("$pkg")
 done
 if ((${#missing[@]})); then
-    echo "Missing system packages. Install them, then run this again:" >&2
+    echo "Missing system packages, so nothing was installed yet. Install them, then" >&2
+    echo "run this again:" >&2
     echo "    sudo apt install ${missing[*]}" >&2
     exit 1
 fi
@@ -99,6 +100,10 @@ if os.path.exists(site):
     if n:
         print(f"==> Added {n} TV(s) from site.json")
 s.save()
+if not s["tvs"]:
+    print("==> No TVs saved yet. The app asks for one when it first opens. To bring your")
+    print("    TVs from another computer, copy its ~/.config/airmedia-share/settings.json")
+    print("    to the same place here (or next to install.sh as site.json) and rerun.")
 PY
 
 # ---- retire the first version (Share to Office TV), if present

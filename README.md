@@ -52,6 +52,13 @@ cd airmedia-share
 ./install.sh
 ```
 
+Read the installer's output. If a system package is missing, it stops before
+installing anything and prints the `sudo apt install …` line to run; run that, then
+`./install.sh` again. It also needs internet access to download the pinned Python
+packages. It ends with a self-check, and "AirMedia Share" is in the app menu
+only after that. If you got the folder from a zip and `./install.sh` says "Permission
+denied", run `bash install.sh` instead.
+
 Everything goes into your home directory. Nothing is installed system-wide and sudo is
 never used:
 
@@ -81,11 +88,24 @@ To pre-load a room's TVs, put a `site.json` next to `install.sh` before installi
 The installer adds any TVs you don't already have and never overwrites your names or
 default. `site.json` is git-ignored.
 
+### Moving to another computer
+
+Your TVs and preferences live in `~/.config/airmedia-share/settings.json`, **not** in
+the project folder, so copying the folder doesn't bring them along (only a `site.json`
+you put there yourself). On the new computer:
+
+1. Install as above, from a clone or a copy of the folder.
+2. Copy `~/.config/airmedia-share/settings.json` from the old computer to the same
+   path on the new one. Alternatively, drop it next to `install.sh` as `site.json`
+   before installing, which brings over just the TVs.
+3. Open the app. If you skipped step 2, it asks you to add a TV on first launch.
+
 ## Use
 
 1. Open **AirMedia Share** from the app menu (searching "air" or "share" finds it).
    Pin it to the dock if you like.
-2. Pick the **TV**. Your default is preselected.
+2. Pick the **TV**. Your default is preselected. On a new computer, the first launch
+   asks you to add one (see [Managing TVs](#managing-tvs)).
 3. Pick **what to share**, then click **Share**.
 4. The TV shows a 4-digit code. Type it in the box that appears and press Enter.
    A new code comes up for every connection, and it only appears once you've
@@ -123,6 +143,9 @@ airmedia-share --check --deep   # also does the receiver handshake (the TV brief
 
 | Symptom | Likely cause and fix |
 |---|---|
+| No "AirMedia Share" in the app menu after installing | The installer stopped before the end. Run `bash install.sh` in a terminal and read the output: it stops at the first problem, such as a missing system package or no internet for the Python packages. `ls ~/.local/bin/airmedia-share` shows whether it got that far. |
+| `./install.sh: Permission denied` | The folder came from a zip that dropped the executable bit. Run `bash install.sh`. |
+| No TVs on a new computer | They live in `~/.config/airmedia-share/settings.json`, not in the project folder. See [Moving to another computer](#moving-to-another-computer). |
 | A dialog says the Python environment needs a repair | Usually after an Ubuntu upgrade replaced the system Python. Run `~/.local/share/airmedia-share/install.sh --repair`. |
 | "Could not reach …" | TV off, or this computer is on a different network or VLAN. `--check` shows whether port 7300 answers. |
 | Connected, but the TV shows nothing | Another presenter may have the screen, or a receiver firmware update changed something. Run `--check --deep`, then look at the log. |
