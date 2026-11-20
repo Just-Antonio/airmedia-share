@@ -20,12 +20,10 @@ import threading
 import gi
 
 gi.require_version("Gtk", "3.0")
-gi.require_version("Gdk", "3.0")
-gi.require_version("Wnck", "3.0")
 gi.require_version("Notify", "0.7")
-from gi.repository import Gdk, Gio, GLib, Gtk, Notify, Wnck  # noqa: E402
+from gi.repository import Gio, GLib, Gtk, Notify  # noqa: E402
 
-from . import media, receiver  # noqa: E402
+from . import backends, media, receiver  # noqa: E402
 from .settings import Settings  # noqa: E402
 
 APP_ID = "io.github.just_antonio.AirMediaShare"
@@ -62,20 +60,15 @@ class SessionThread:
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
 
-def make_capture(target, screen_size):
-    display = os.environ.get("DISPLAY", ":0")
-    if target is None:
-        player = media.open_capture(display, screen_size=screen_size)
-    else:
-        player = media.open_capture(display, window_id=target)
-    return player.video
-
-
 class ShareWindow(Gtk.ApplicationWindow):
+    """The window. Everything specific to X11 or Wayland lives in `self.backend`
+    (see backends/__init__.py); this class only deals with TVs, sound, and the session."""
+
     def __init__(self, app):
         super().__init__(application=app, title=APP_NAME)
         self.app = app
         self.settings = app.settings
+        self.backend = backends.load(self)
         self.set_default_size(460, 600)
         self.set_icon_name("video-display")
 
@@ -107,15 +100,14 @@ class ShareWindow(Gtk.ApplicationWindow):
 
         self.sources = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.sources.connect("row-selected", self.on_source_selected)
+        self.sources.connect("row-activated", self.on_source_activated)
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_shadow_type(Gtk.ShadowType.IN)
         scroller.add(self.sources)
         outer.pack_start(scroller, True, True, 0)
 
         hint = Gtk.Label(xalign=0, wrap=True)
-        hint.set_markup(
-            "<small>A window shares only that app's sound. To share a browser tab, "
-            "pick the browser window; the TV shows whichever tab is in front.</small>")
+        hint.set_markup(self.backend.hint)
         hint.get_style_context().add_class("dim-label")
         outer.pack_start(hint, False, False, 0)
 
@@ -135,6 +127,10 @@ class ShareWindow(Gtk.ApplicationWindow):
         audio_row.pack_end(self.audio_switch, False, False, 0)
         outer.pack_start(audio_row, False, False, 0)
         self.volume.set_sensitive(self.settings["sound"])
+
+        extra = self.backend.extra_widget()
+        if extra is not None:
+            outer.pack_start(extra, False, False, 0)
 
         # ----- code entry, revealed only once the TV is showing a code
         self.code_revealer = Gtk.Revealer()
@@ -167,13 +163,10 @@ class ShareWindow(Gtk.ApplicationWindow):
         self.closing = False
         self.shared_label = ""
         self.shared_target = None
+        self.shared_row = None
         self.connect("delete-event", self.on_close)
 
-        self.wnck = Wnck.Screen.get_default()
-        self.wnck.force_update()
-        for signal in ("window-opened", "window-closed"):
-            self.wnck.connect(signal, lambda *a: GLib.idle_add(self.refresh_sources))
-        self.refresh_sources()
+        self.backend.build_sources()
         self.refresh_tvs(self.settings["default"])
         self.set_status("Ready." if self.settings["tvs"] else
                         "Add a TV to get started (⋮ menu next to TV).")
@@ -227,9 +220,10 @@ class ShareWindow(Gtk.ApplicationWindow):
             mi.set_sensitive(tv is not None)
         self.default_item.set_sensitive(tv is not None and host != self.settings["default"])
         idle = self.state == "idle"
-        self.tv_combo.set_sensitive(idle)
-        self.tv_menu_button.set_sensitive(idle)
-        self.button.set_sensitive(tv is not None or not idle)
+        busy = self.backend.busy
+        self.tv_combo.set_sensitive(idle and not busy)
+        self.tv_menu_button.set_sensitive(idle and not busy)
+        self.button.set_sensitive((tv is not None or not idle) and not busy)
 
     def on_tv_changed(self, _combo):
         self.update_tv_widgets()
@@ -322,26 +316,7 @@ class ShareWindow(Gtk.ApplicationWindow):
 
     # ----- sources -----------------------------------------------------------
 
-    def refresh_sources(self):
-        selected = self.selected_row_attr("target")
-        for row in self.sources.get_children():
-            self.sources.remove(row)
-        self.add_source_row(None, "Entire screen", Gtk.Image.new_from_icon_name(
-            "video-display", Gtk.IconSize.LARGE_TOOLBAR))
-        own = self.get_window().get_xid() if self.get_window() else None
-        for win in self.wnck.get_windows():
-            if win.get_window_type() != Wnck.WindowType.NORMAL or win.get_xid() == own:
-                continue
-            icon = Gtk.Image.new_from_pixbuf(win.get_mini_icon())
-            self.add_source_row(win.get_xid(), win.get_name(), icon, win, win.get_pid())
-        self.sources.show_all()
-        for row in self.sources.get_children():
-            if row.target == selected:
-                self.sources.select_row(row)
-                break
-        else:
-            self.sources.select_row(self.sources.get_row_at_index(0))
-        return False
+    # The list itself is filled by the backend (build_sources); this is what it uses.
 
     def add_source_row(self, target, title, icon, win=None, pid=0):
         row = Gtk.ListBoxRow()
@@ -363,20 +338,22 @@ class ShareWindow(Gtk.ApplicationWindow):
         row = self.sources.get_selected_row()
         return getattr(row, name) if row else default
 
-    def screen_size(self):
-        screen = Gdk.Screen.get_default()
-        return screen.get_width(), screen.get_height()
-
     def on_source_selected(self, _box, row):
+        self.backend.selection_changed(row)
         if row is None or self.state != "sharing" or row.target == self.shared_target:
             return
-        # Switch what is shared without asking the TV for a new code.
-        source = make_capture(row.target, self.screen_size())
-        self.shared_label, self.shared_target = row.title, row.target
+        self.backend.switch(row)
+
+    def on_source_activated(self, _box, row):
+        self.backend.row_activated(row)
+
+    def switch_source(self, row, label, source, pids):
+        """Swap what the running share sends, without asking the TV for a new code."""
+        self.shared_label, self.shared_target, self.shared_row = label, row.target, row
         worker = self.app.worker
-        worker.loop.call_soon_threadsafe(worker.session.switch, source, row.pids)
-        self.set_status(f"Sharing “{row.title}” on {self.tv_label()}.")
-        log.info("switched to %s (pids %s)", row.title, row.pids)
+        worker.loop.call_soon_threadsafe(worker.session.switch, source, pids)
+        self.set_status(f"Sharing “{label}” on {self.tv_label()}.")
+        log.info("switched to %s (pids %s)", label, pids)
 
     def on_audio_toggled(self, switch, _param):
         self.settings["sound"] = switch.get_active()
@@ -407,10 +384,17 @@ class ShareWindow(Gtk.ApplicationWindow):
         if not host:
             self.add_tv_dialog()
             return
+        self.backend.start(host)
+
+    def begin(self, host, target, source, label, pids):
+        """Connect to the TV and send `source` (a video track) with the sound of `pids`.
+
+        Called by the backend once it has the source: it may have had to ask first.
+        """
         worker = self.app.worker
-        target = self.selected_row_attr("target")
-        self.shared_label = self.selected_row_attr("title", "Entire screen")
+        self.shared_label = label
         self.shared_target = target
+        self.shared_row = self.sources.get_selected_row()
         mbps = max(2, int(self.settings["max_mbps"]))
         receiver.set_bitrate_range(2_000_000, min(10, mbps) * 1_000_000, mbps * 1_000_000)
 
@@ -418,13 +402,13 @@ class ShareWindow(Gtk.ApplicationWindow):
         audio.muted = not self.audio_switch.get_active()
         audio.volume = volume_gain(self.volume.get_value())
         audio.follow_system_volume = self.settings["follow_system_volume"]
-        audio.follow_pids(self.selected_row_attr("pids"))
+        audio.follow_pids(pids)
         worker.audio = audio
 
         def on_state(state, detail=""):
             GLib.idle_add(self.on_session_state, state, detail)
 
-        video = media.ScreenVideoTrack(make_capture(target, self.screen_size()), *media.CANVAS)
+        video = media.ScreenVideoTrack(source, *media.CANVAS)
         session = receiver.Session(host, self.ask_code, video, audio, on_state=on_state,
                                    video_codec=self.settings["video_codec"])
         worker.session = session
@@ -504,6 +488,7 @@ class ShareWindow(Gtk.ApplicationWindow):
         self.cancel_code()
         self.app.worker.session = None
         self.app.worker.audio = None
+        self.backend.session_ended()
         self.set_state("idle")
         if error:
             self.set_status(error)
@@ -531,6 +516,7 @@ class ShareWindow(Gtk.ApplicationWindow):
             self.button.set_label("Stop sharing")
             ctx.add_class("destructive-action")
         self.update_tv_widgets()
+        self.backend.state_changed()
 
     def set_status(self, text):
         self.status.set_text(text)
@@ -570,10 +556,9 @@ class ShareApp(Gtk.Application):
                 self.quit()  # launched only to stop, and nothing was running
             return 0
         if self.window is None:
-            if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-                self.fatal("AirMedia Share needs an X11 session",
-                           "Screen capture here uses X11. Log out, pick “Ubuntu on Xorg” "
-                           "from the gear on the login screen, and try again.")
+            problem = backends.backend_class().problem()
+            if problem:
+                self.fatal(*problem)
                 return 1
             self.window = ShareWindow(self)
             self.window.show_all()

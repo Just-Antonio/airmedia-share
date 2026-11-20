@@ -1,6 +1,6 @@
 import unittest
 
-from airmedia_share import portal
+from airmedia_share.backends import portal
 
 
 class RequestPathTest(unittest.TestCase):

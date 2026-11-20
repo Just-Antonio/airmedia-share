@@ -3,7 +3,8 @@
 A Wayland client cannot read other windows or the screen on its own. It asks the
 compositor's portal backend (xdg-desktop-portal-kde, -gnome, ...), the user picks a
 screen or window in the compositor's own dialog, and the portal hands back a PipeWire
-node to read frames from (see media.PipeWireVideoSource).
+node to read frames from (see pipewire.PipeWireVideoSource). backends/wayland.py is the
+GTK side that drives this.
 
 Every portal call here is asynchronous and runs on the GLib main loop (the GTK thread):
 

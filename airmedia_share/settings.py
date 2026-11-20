@@ -26,6 +26,9 @@ DEFAULTS = {
     "sound": True,
     "volume": 100,
     "follow_system_volume": False,
+    # Wayland: the desktop portal's token for the last screen shared, so that "Entire
+    # screen" can skip the picker dialog. Rewritten after every use (tokens are single-use).
+    "portal_restore_token": None,
     # Escape hatches for a future receiver firmware or a slow network.
     "video_codec": None,  # None lets the TV pick (it picks VP8); or "H264"
     "max_mbps": 20,
