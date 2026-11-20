@@ -83,5 +83,66 @@ class AncestorsTest(unittest.TestCase):
         self.assertIn(os.getppid(), chain)
 
 
+class BgrxFrameTest(unittest.TestCase):
+    def test_padded_rows_are_cropped_and_colors_kept(self):
+        w, h, stride = 6, 4, 32  # 24 bytes of pixels + 8 of padding per row
+        buf = np.zeros((h, stride), np.uint8)
+        buf[:, :w * 4] = np.tile(np.array([10, 20, 30, 0], np.uint8), (h, w))  # B, G, R, x
+        buf[:, w * 4:] = 255  # padding must not leak into the picture
+        frame = media.bgrx_to_frame(buf.tobytes(), w, h, stride)
+        self.assertEqual((frame.width, frame.height), (w, h))
+        px = frame.to_ndarray(format="rgb24")
+        self.assertTrue((px == [30, 20, 10]).all())
+
+    def test_tightly_packed_rows(self):
+        w, h = 8, 2
+        data = bytes([1, 2, 3, 0]) * (w * h)
+        frame = media.bgrx_to_frame(data, w, h, w * 4)
+        self.assertEqual((frame.width, frame.height), (w, h))
+
+    def test_fits_the_canvas_like_any_other_source(self):
+        # A window-sized capture goes through ScreenVideoTrack's letterboxing unchanged.
+        frame = media.bgrx_to_frame(bytes(4) * (640 * 480), 640, 480, 640 * 4)
+
+        class Once(MediaStreamTrack):
+            kind = "video"
+
+            async def recv(self):
+                return frame
+
+        out = asyncio.run(media.ScreenVideoTrack(Once(), 1920, 1080).recv())
+        self.assertEqual((out.width, out.height), (1920, 1080))
+
+
+class AudioAppsTest(unittest.TestCase):
+    @staticmethod
+    def stream(name, pid, binary=None):
+        props = {}
+        if name:
+            props["application.name"] = name
+        if pid is not None:
+            props["application.process.id"] = str(pid)
+        if binary:
+            props["application.process.binary"] = binary
+        return {"index": 1, "properties": props}
+
+    def test_streams_of_one_app_are_grouped(self):
+        apps = media.audio_apps([self.stream("Brave", 100), self.stream("Brave", 101),
+                                 self.stream("mpv", 7)])
+        self.assertEqual(apps, [("Brave", {100, 101}), ("mpv", {7})])
+
+    def test_streams_without_a_process_id_are_left_out(self):
+        self.assertEqual(media.audio_apps([self.stream("Weird", None),
+                                           {"properties": {}}, {}]), [])
+
+    def test_falls_back_to_binary_then_pid_for_the_name(self):
+        apps = media.audio_apps([self.stream(None, 5, binary="vlc"), self.stream(None, 6)])
+        self.assertEqual(apps, [("process 6", {6}), ("vlc", {5})])
+
+    def test_sorted_case_insensitively(self):
+        apps = media.audio_apps([self.stream("zoom", 1), self.stream("Audacity", 2)])
+        self.assertEqual([name for name, _ in apps], ["Audacity", "zoom"])
+
+
 if __name__ == "__main__":
     unittest.main()
