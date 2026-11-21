@@ -125,7 +125,8 @@ class WaylandBackend(Backend):
             if stream is not None and stream.source_type != portal.WINDOW \
                     and stream.restore_token:
                 # A screen was granted (whichever row asked): remember it, so the next
-                # "Entire screen" needs no dialog. Tokens are single-use; this is the new one.
+                # "Entire screen" needs no dialog. Some portals hand out a fresh token on
+                # each use (KDE returns the same one), so always keep the latest.
                 settings["portal_restore_token"] = stream.restore_token
                 settings.save()
             on_result(stream, error)
