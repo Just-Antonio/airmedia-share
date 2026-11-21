@@ -10,6 +10,10 @@ that extension (a WebSocket on port 7300, then WebRTC) using
 
 Verified with an **AM-3200** (AirMedia Series 3) from **Ubuntu 22.04** on X11.
 
+**Wayland** is supported too, through the desktop's screen-sharing portal. It has been
+tested on **KDE Plasma 6 (NixOS)** against this project's fake receiver, and not yet
+against a real receiver or on GNOME. See [Wayland](#wayland).
+
 Not affiliated with or endorsed by Crestron. AirMedia is a Crestron trademark.
 
 ## What it does
@@ -29,16 +33,28 @@ Tabs: pick the browser window. The TV shows whichever tab is in front, with its 
 
 ## Requirements
 
-- Ubuntu 22.04 or similar, logged in to an **X11** session ("Ubuntu on Xorg" on the
-  login screen's gear menu). Screen capture here uses X11, so Wayland won't work.
+- Ubuntu 22.04 or similar, on **X11** or **Wayland**.
 - PulseAudio or PipeWire-Pulse (`parec`, `pactl`)
 - These system packages (the installer checks for them and prints the command if
   any are missing):
 
   ```
-  sudo apt install python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-wnck-3.0 \
-                   gir1.2-notify-0.7 pulseaudio-utils zenity
+  sudo apt install python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 \
+                   pulseaudio-utils zenity
   ```
+
+  plus, depending on the session you log in to:
+
+  ```
+  sudo apt install gir1.2-wnck-3.0                                  # X11
+  sudo apt install gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+                   gstreamer1.0-pipewire xdg-desktop-portal         # Wayland
+  ```
+
+  Wayland also needs the portal backend for your desktop
+  (`xdg-desktop-portal-gnome`, `-kde` or `-wlr`), which desktops normally ship.
+  If you switch between X11 and Wayland, run `./install.sh` again so it checks the
+  other session's packages.
 
 - The computer must be able to reach the receiver on TCP 7300, plus UDP for the
   video. On a campus network that usually means being on the same network as the
@@ -131,13 +147,36 @@ Use the **⋮** menu next to the TV picker:
 The name the receiver reports about itself (e.g. `ROOM-AM3200`) is saved on the first
 connection and shown in the TV picker's tooltip.
 
+### Wayland
+
+A Wayland app can't list or read other windows, so your desktop decides what gets
+shared, through its screen-sharing dialog (the same one browsers use for video calls).
+That changes a few things compared to X11:
+
+- The list has two entries: **Entire screen** and **Choose a screen or window…**. The
+  second opens the desktop's own picker. After the first time, the desktop usually
+  remembers "Entire screen" and doesn't ask again.
+- You choose *before* the TV is contacted, so the TV only shows its code once there is
+  something to send.
+- To switch while sharing, click the other entry. The desktop may ask again; the TV keeps
+  its connection and the code stays valid. If you cancel the dialog, the current share
+  carries on. Click **Choose a screen or window…** again to pick a different window.
+- **Sound from**: the picker doesn't tell this app which program owns a window, so for a
+  window you choose whose sound to send: everything the computer plays, or one app. An
+  app shows up in the list once it is playing something.
+- A shared window is called "Selected window" (the desktop doesn't pass titles on).
+
+Tested on KDE Plasma 6 (`xdg-desktop-portal-kde`). GNOME's portal works the same way but
+hasn't been tried. If you try it, a note on what worked is welcome (see
+[issue #2](https://github.com/Just-Antonio/airmedia-share/issues/2)).
+
 ## Troubleshooting
 
 Start with the self-check. Run it from the menu (right-click the launcher → **Run
 self-check**) or in a terminal:
 
 ```
-airmedia-share --check          # packages, X11, audio tools, can each TV be reached
+airmedia-share --check          # packages, X11/Wayland capture, audio tools, can each TV be reached
 airmedia-share --check --deep   # also does the receiver handshake (the TV briefly shows a code)
 ```
 
@@ -154,8 +193,10 @@ airmedia-share --check --deep   # also does the receiver handshake (the TV brief
 | No sound on the TV | Check the Sound switch and slider. For a window, only that app's sound is sent: is it the app that's actually playing? Some apps play sound from a helper process, which is also matched. |
 | Picture is soft, or stutters on slow Wi-Fi | In `settings.json`, set `"max_mbps"` lower (e.g. 8) or higher (up to ~24). Try `"video_codec": "H264"` if a firmware update stops accepting VP8. |
 | App won't open, and nothing happens | Check `~/.cache/airmedia-share/sender.log`. A run from a terminal (`airmedia-share`) prints errors too. |
-| Wayland session | Log out, choose "Ubuntu on Xorg" from the login screen's gear menu. |
-
+| Wayland: a dialog says the portal or screen capture isn't available | `--check` says which part is missing. Install `xdg-desktop-portal` and your desktop's backend (`xdg-desktop-portal-gnome`/`-kde`/`-wlr`), and `gstreamer1.0-pipewire` plus the GStreamer Python bindings (see [Requirements](#requirements)), then log out and in again. |
+| Wayland: "Nothing shared." | You closed the desktop's picker without choosing. Click Share again. |
+| Wayland: no app in "Sound from" | Only apps that are playing sound right now are listed. Start the audio, and it appears within a couple of seconds. |
+| Wayland: the picker opens on every "Entire screen" | The desktop didn't keep the choice (older portals have no restore tokens; `--check` warns about it). Pick the screen each time. |
 ## Update, repair, uninstall
 
 ```
@@ -179,6 +220,32 @@ pip install -r requirements.txt
 python -m unittest discover -s tests -t . -v   # includes a loopback test against a fake receiver
 PYTHONPATH=. python -m airmedia_share          # run from the checkout
 ```
+
+On NixOS (or with Nix anywhere), `shell.nix` provides all of the above, including
+GStreamer's PipeWire plugin, `parec`/`pactl` and the GTK bindings:
+
+```
+nix-shell --run "python -m unittest discover -s tests -t . -v"
+nix-shell --run "PYTHONPATH=. python -m airmedia_share"
+```
+
+`install.sh` is for Debian/Ubuntu. On NixOS, nixpkgs' PyAV is built without `x11grab`,
+so only the Wayland path works there.
+
+What differs between X11 and Wayland lives in `airmedia_share/backends/`, one module per
+kind of session; `app.py` only talks to the small `Backend` interface in
+`backends/__init__.py`, and only the running session's module is ever imported:
+
+| File | Role |
+|---|---|
+| `backends/x11.py` | `x11grab` capture, and the window list from Wnck |
+| `backends/wayland.py` | the portal's picker in the window: sources, switching, "Sound from" |
+| `backends/portal.py` | Wayland: the `xdg-desktop-portal` ScreenCast client (no GTK) |
+| `backends/pipewire.py` | Wayland: frames from the granted PipeWire node via GStreamer (no GTK) |
+| `media.py` | what both share: fitting frames to the TV's canvas, and the sound |
+
+The two Wayland helpers stay free of GTK so their pure parts are tested in CI, which has
+no display.
 
 `tests/fake_receiver.py` plays the TV's side of the protocol on aiortc, and enforces the
 receiver behaviors that were learned the hard way (see

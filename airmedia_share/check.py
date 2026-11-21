@@ -11,7 +11,7 @@ import shutil
 import socket
 import sys
 
-from . import __version__
+from . import __version__, backends
 
 OK, BAD, WARN = "  ok  ", " FAIL ", " warn "
 
@@ -32,30 +32,54 @@ def check_python():
             good = line(BAD, f"python: {mod}", f"{e}; run install.sh --repair") and good
     try:
         import av
-        if "x11grab" not in av.formats_available:
+        if backends.session_type() == "x11" and "x11grab" not in av.formats_available:
             good = line(BAD, "PyAV x11grab", "this PyAV build cannot capture X11") and good
     except Exception:
         pass
     return good
 
 
+def check_wayland():
+    """The Wayland capture path: the ScreenCast portal, and GStreamer's PipeWire source."""
+    from .backends import pipewire, portal
+    info = portal.portal_info()
+    if info is None:
+        return line(BAD, "ScreenCast portal",
+                    "xdg-desktop-portal is not answering; install it and the backend for "
+                    "your desktop (xdg-desktop-portal-kde, -gnome or -wlr)")
+    good = True
+    line(OK, f"ScreenCast portal v{info['version']}")
+    if not info["source_types"] & portal.WINDOW:
+        line(WARN, "portal cannot share single windows", "only whole screens will work")
+    if info["version"] < 4:
+        line(WARN, "portal has no restore tokens",
+             "the desktop's picker will open for the screen every time")
+    problem = pipewire.capture_problem()
+    if problem:
+        good = line(BAD, "GStreamer PipeWire capture", problem) and good
+    else:
+        line(OK, "GStreamer pipewiresrc")
+    return good
+
+
 def check_desktop():
     good = True
-    session = os.environ.get("XDG_SESSION_TYPE", "?")
-    if session == "x11":
-        line(OK, "X11 session")
-    else:
-        good = line(BAD, f"session is {session}",
-                    "screen capture needs X11: pick “Ubuntu on Xorg” at login") and good
+    wayland = backends.session_type() == "wayland"
+    line(OK, "Wayland session" if wayland else "X11 session",
+         os.environ.get("XDG_CURRENT_DESKTOP", ""))
     try:
         import gi
-        for ns, ver in (("Gtk", "3.0"), ("Wnck", "3.0"), ("Notify", "0.7")):
+        # Wnck lists X11 windows only; on Wayland the portal's picker replaces it.
+        for ns, ver in (("Gtk", "3.0"), ("Notify", "0.7")) + (() if wayland else (("Wnck", "3.0"),)):
             gi.require_version(ns, ver)
             __import__("gi.repository", fromlist=[ns])
-        line(OK, "GTK, Wnck, libnotify bindings")
+        line(OK, "GTK, libnotify bindings" if wayland else "GTK, Wnck, libnotify bindings")
     except Exception as e:
-        good = line(BAD, "GTK/Wnck/libnotify bindings",
-                    f"{e}; sudo apt install python3-gi gir1.2-wnck-3.0 gir1.2-notify-0.7") and good
+        good = line(BAD, "GTK/libnotify bindings" if wayland else "GTK/Wnck/libnotify bindings",
+                    f"{e}; sudo apt install python3-gi gir1.2-notify-0.7"
+                    + ("" if wayland else " gir1.2-wnck-3.0")) and good
+    if wayland:
+        good = check_wayland() and good
     for tool in ("parec", "pactl"):
         if shutil.which(tool):
             line(OK, f"{tool}")
