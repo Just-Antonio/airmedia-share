@@ -35,21 +35,36 @@ else
 fi
 
 # ---- system requirements (reported, never installed with sudo behind your back)
-missing=()
-for pkg in python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-wnck-3.0 gir1.2-notify-0.7 \
-           pulseaudio-utils zenity; do
-    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" \
-        || missing+=("$pkg")
-done
-if ((${#missing[@]})); then
-    echo "Missing system packages, so nothing was installed yet. Install them, then" >&2
-    echo "run this again:" >&2
-    echo "    sudo apt install ${missing[*]}" >&2
-    exit 1
-fi
+# Besides the common packages, the session decides what captures the screen: on X11,
+# Wnck lists the windows; on Wayland the desktop portal's own picker replaces that and
+# GStreamer reads the PipeWire stream it grants.
 if [[ "${XDG_SESSION_TYPE:-x11}" == "wayland" ]]; then
-    echo "Note: this session is Wayland. AirMedia Share captures the screen through X11;"
-    echo "      choose “Ubuntu on Xorg” at the login screen to use it."
+    session_pkgs=(gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire
+                  xdg-desktop-portal)
+    echo "Note: this session is Wayland. The desktop asks you which screen or window to"
+    echo "      share (xdg-desktop-portal). After switching between X11 and Wayland, run"
+    echo "      this again so the packages for the other session get checked."
+else
+    session_pkgs=(gir1.2-wnck-3.0)
+fi
+if command -v dpkg-query >/dev/null 2>&1; then
+    missing=()
+    for pkg in python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 pulseaudio-utils \
+               zenity "${session_pkgs[@]}"; do
+        dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" \
+            || missing+=("$pkg")
+    done
+    if ((${#missing[@]})); then
+        echo "Missing system packages, so nothing was installed yet. Install them, then" >&2
+        echo "run this again:" >&2
+        echo "    sudo apt install ${missing[*]}" >&2
+        exit 1
+    fi
+else
+    echo "Note: no dpkg here, so the system packages were not checked. You need Python 3 with" >&2
+    echo "      venv, PyGObject, GTK 3, libnotify, pulseaudio-utils (parec, pactl), zenity and" >&2
+    echo "      either Wnck (X11) or GStreamer with PipeWire plus xdg-desktop-portal (Wayland)." >&2
+    echo "      On NixOS, use 'nix-shell' from this folder instead (see README, Development)." >&2
 fi
 
 # ---- private Python environment

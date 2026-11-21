@@ -83,5 +83,35 @@ class AncestorsTest(unittest.TestCase):
         self.assertIn(os.getppid(), chain)
 
 
+class AudioAppsTest(unittest.TestCase):
+    @staticmethod
+    def stream(name, pid, binary=None):
+        props = {}
+        if name:
+            props["application.name"] = name
+        if pid is not None:
+            props["application.process.id"] = str(pid)
+        if binary:
+            props["application.process.binary"] = binary
+        return {"index": 1, "properties": props}
+
+    def test_streams_of_one_app_are_grouped(self):
+        apps = media.audio_apps([self.stream("Brave", 100), self.stream("Brave", 101),
+                                 self.stream("mpv", 7)])
+        self.assertEqual(apps, [("Brave", {100, 101}), ("mpv", {7})])
+
+    def test_streams_without_a_process_id_are_left_out(self):
+        self.assertEqual(media.audio_apps([self.stream("Weird", None),
+                                           {"properties": {}}, {}]), [])
+
+    def test_falls_back_to_binary_then_pid_for_the_name(self):
+        apps = media.audio_apps([self.stream(None, 5, binary="vlc"), self.stream(None, 6)])
+        self.assertEqual(apps, [("process 6", {6}), ("vlc", {5})])
+
+    def test_sorted_case_insensitively(self):
+        apps = media.audio_apps([self.stream("zoom", 1), self.stream("Audacity", 2)])
+        self.assertEqual([name for name, _ in apps], ["Audacity", "zoom"])
+
+
 if __name__ == "__main__":
     unittest.main()

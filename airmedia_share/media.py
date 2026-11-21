@@ -1,21 +1,22 @@
 """What gets sent to the TV: the screen or one window, and the computer's sound.
 
-Video comes from X11 via PyAV's x11grab (so this needs an X11 session, not Wayland);
-audio comes from PulseAudio via `parec`. Both are wrapped so that the WebRTC session
-keeps one track of each for its whole life and only what feeds them changes.
+Nothing here depends on the kind of desktop session. The video itself is captured by a
+backend (backends/x11.py or backends/wayland.py); this module fits whatever it produces
+into the fixed canvas. Audio comes from PulseAudio or PipeWire-Pulse via `parec`. Both
+are wrapped so that the WebRTC session keeps one track of each for its whole life and
+only what feeds them changes.
 """
 
 import asyncio
 import fractions
 import json
 import logging
-import re
+import subprocess
 import time
 
 import av
 import numpy as np
 from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaPlayer
 from aiortc.mediastreams import MediaStreamError
 
 log = logging.getLogger(__name__)
@@ -108,6 +109,36 @@ def _ancestors(pid):
         except (OSError, ValueError, IndexError):
             break
     return chain
+
+
+def audio_apps(sink_inputs):
+    """[(app name, {pids})] for the apps playing sound, from `pactl list sink-inputs`.
+
+    On Wayland the portal's picker chooses the window, so the app cannot learn which
+    process owns it; the user picks whose sound to send from this list instead. Streams
+    without a process id cannot be isolated and are left out.
+    """
+    apps = {}
+    for si in sink_inputs:
+        props = si.get("properties") or {}
+        try:
+            pid = int(props["application.process.id"])
+        except (KeyError, ValueError):
+            continue
+        name = props.get("application.name") or props.get("application.process.binary") \
+            or f"process {pid}"
+        apps.setdefault(name, set()).add(pid)
+    return sorted(apps.items(), key=lambda app: app[0].lower())
+
+
+def list_audio_apps():
+    """audio_apps() for what is playing right now ([] if pactl is missing or fails)."""
+    try:
+        out = subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
+                             capture_output=True, timeout=3, check=True).stdout
+        return audio_apps(json.loads(out or b"[]"))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
 
 
 def mix_chunks(buffers, samples, gain):
@@ -278,13 +309,3 @@ class ComputerAudioTrack(MediaStreamTrack):
             self._close_stream(key)
         if self._subscribe is not None and self._subscribe.returncode is None:
             self._subscribe.kill()
-
-
-def open_capture(display, *, window_id=None, screen_size=None, fps=30):
-    """x11grab of the whole screen, or of one window by X id (follows it when moved)."""
-    options = {"framerate": str(fps), "draw_mouse": "1"}
-    if window_id is not None:
-        options["window_id"] = str(window_id)
-    else:
-        options["video_size"] = "%dx%d" % screen_size
-    return MediaPlayer(display, format="x11grab", options=options)

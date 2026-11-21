@@ -10,6 +10,10 @@ that extension (a WebSocket on port 7300, then WebRTC) using
 
 Verified with an **AM-3200** (AirMedia Series 3) from **Ubuntu 22.04** on X11.
 
+**Wayland** is supported too, through the desktop's screen-sharing portal. It has been
+tested on **KDE Plasma 6** and **GNOME 50** (both on NixOS) against this project's fake
+receiver, and not yet against a real receiver. See [Wayland](#wayland).
+
 Not affiliated with or endorsed by Crestron. AirMedia is a Crestron trademark.
 
 ## What it does
@@ -29,16 +33,28 @@ Tabs: pick the browser window. The TV shows whichever tab is in front, with its 
 
 ## Requirements
 
-- Ubuntu 22.04 or similar, logged in to an **X11** session ("Ubuntu on Xorg" on the
-  login screen's gear menu). Screen capture here uses X11, so Wayland won't work.
+- Ubuntu 22.04 or similar, on **X11** or **Wayland**.
 - PulseAudio or PipeWire-Pulse (`parec`, `pactl`)
 - These system packages (the installer checks for them and prints the command if
   any are missing):
 
   ```
-  sudo apt install python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-wnck-3.0 \
-                   gir1.2-notify-0.7 pulseaudio-utils zenity
+  sudo apt install python3-venv python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 \
+                   pulseaudio-utils zenity
   ```
+
+  plus, depending on the session you log in to:
+
+  ```
+  sudo apt install gir1.2-wnck-3.0                                  # X11
+  sudo apt install gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+                   gstreamer1.0-pipewire xdg-desktop-portal         # Wayland
+  ```
+
+  Wayland also needs the portal backend for your desktop
+  (`xdg-desktop-portal-gnome`, `-kde` or `-wlr`), which desktops normally ship.
+  If you switch between X11 and Wayland, run `./install.sh` again so it checks the
+  other session's packages.
 
 - The computer must be able to reach the receiver on TCP 7300, plus UDP for the
   video. On a campus network that usually means being on the same network as the
@@ -131,13 +147,40 @@ Use the **⋮** menu next to the TV picker:
 The name the receiver reports about itself (e.g. `ROOM-AM3200`) is saved on the first
 connection and shown in the TV picker's tooltip.
 
+### Wayland
+
+A Wayland app can't list or read other windows, so your desktop decides what gets
+shared, through its screen-sharing dialog (the same one browsers use for video calls).
+That changes a few things compared to X11:
+
+- The list has two entries: **Entire screen** and **Choose a screen or window…**. The
+  second opens the desktop's own picker. After the first time, the desktop usually
+  remembers "Entire screen" and doesn't ask again.
+- You choose *before* the TV is contacted, so the TV only shows its code once there is
+  something to send.
+- To switch while sharing, click the other entry. The desktop may ask again; the TV keeps
+  its connection and the code stays valid. If you cancel the dialog, the current share
+  carries on. Click **Choose a screen or window…** again to pick a different window.
+- **Sound from**: the picker doesn't tell this app which program owns a window, so for a
+  window you choose whose sound to send: everything the computer plays, or one app. An
+  app shows up in the list once it is playing something.
+- A shared window is called "Selected window" (the desktop doesn't pass titles on).
+
+Tested on KDE Plasma 6 (`xdg-desktop-portal-kde`) and on GNOME 50
+(`xdg-desktop-portal-gnome`, in a [VM](#trying-gnome-in-a-nixos-vm)). On both: the
+screen, a window, switching between them, the restore token (the second request for the
+screen needed no dialog) and "Sound from" worked. The GNOME run was a software-rendered
+VM, so its frame rates say little about real hardware, and it was GNOME 50, not the older
+GNOME that Ubuntu LTS releases ship. If you try it elsewhere, a note on what worked is
+welcome (see [issue #2](https://github.com/Just-Antonio/airmedia-share/issues/2)).
+
 ## Troubleshooting
 
 Start with the self-check. Run it from the menu (right-click the launcher → **Run
 self-check**) or in a terminal:
 
 ```
-airmedia-share --check          # packages, X11, audio tools, can each TV be reached
+airmedia-share --check          # packages, X11/Wayland capture, audio tools, can each TV be reached
 airmedia-share --check --deep   # also does the receiver handshake (the TV briefly shows a code)
 ```
 
@@ -154,8 +197,10 @@ airmedia-share --check --deep   # also does the receiver handshake (the TV brief
 | No sound on the TV | Check the Sound switch and slider. For a window, only that app's sound is sent: is it the app that's actually playing? Some apps play sound from a helper process, which is also matched. |
 | Picture is soft, or stutters on slow Wi-Fi | In `settings.json`, set `"max_mbps"` lower (e.g. 8) or higher (up to ~24). Try `"video_codec": "H264"` if a firmware update stops accepting VP8. |
 | App won't open, and nothing happens | Check `~/.cache/airmedia-share/sender.log`. A run from a terminal (`airmedia-share`) prints errors too. |
-| Wayland session | Log out, choose "Ubuntu on Xorg" from the login screen's gear menu. |
-
+| Wayland: a dialog says the portal or screen capture isn't available | `--check` says which part is missing. Install `xdg-desktop-portal` and your desktop's backend (`xdg-desktop-portal-gnome`/`-kde`/`-wlr`), and `gstreamer1.0-pipewire` plus the GStreamer Python bindings (see [Requirements](#requirements)), then log out and in again. |
+| Wayland: "Nothing shared." | You closed the desktop's picker without choosing. Click Share again. |
+| Wayland: no app in "Sound from" | Only apps that are playing sound right now are listed. Start the audio, and it appears within a couple of seconds. |
+| Wayland: the picker opens on every "Entire screen" | The desktop didn't keep the choice (older portals have no restore tokens; `--check` warns about it). Pick the screen each time. |
 ## Update, repair, uninstall
 
 ```
@@ -180,11 +225,126 @@ python -m unittest discover -s tests -t . -v   # includes a loopback test agains
 PYTHONPATH=. python -m airmedia_share          # run from the checkout
 ```
 
+On NixOS (or with Nix anywhere), `shell.nix` provides all of the above, including
+GStreamer's PipeWire plugin, `parec`/`pactl` and the GTK bindings:
+
+```
+nix-shell --run "python -m unittest discover -s tests -t . -v"
+nix-shell --run "PYTHONPATH=. python -m airmedia_share"
+```
+
+`install.sh` is for Debian/Ubuntu. On NixOS, nixpkgs' PyAV is built without `x11grab`,
+so only the Wayland path works there.
+
+What differs between X11 and Wayland lives in `airmedia_share/backends/`, one module per
+kind of session; `app.py` only talks to the small `Backend` interface in
+`backends/__init__.py`, and only the running session's module is ever imported:
+
+| File | Role |
+|---|---|
+| `backends/x11.py` | `x11grab` capture, and the window list from Wnck |
+| `backends/wayland.py` | the portal's picker in the window: sources, switching, "Sound from" |
+| `backends/portal.py` | Wayland: the `xdg-desktop-portal` ScreenCast client (no GTK) |
+| `backends/pipewire.py` | Wayland: frames from the granted PipeWire node via GStreamer (no GTK) |
+| `media.py` | what both share: fitting frames to the TV's canvas, and the sound |
+
+The two Wayland helpers stay free of GTK so their pure parts are tested in CI, which has
+no display.
+
 `tests/fake_receiver.py` plays the TV's side of the protocol on aiortc, and enforces the
 receiver behaviors that were learned the hard way (see
 [docs/protocol.md](docs/protocol.md)). If a dependency upgrade breaks sharing, it
 should fail there first. Bump the pins in `requirements.txt` deliberately, then test
 against a real receiver.
+
+### Tests
+
+There are three layers, from "runs anywhere" to "needs a person at a real desktop":
+
+| Where | What it checks | Needs |
+|---|---|---|
+| `tests/test_*.py` | the protocol against the fake receiver, letterboxing, audio mixing, the portal and PipeWire helpers | nothing; this is what CI runs |
+| `tests/test_gui.py`, which runs `tests/gui/wayland_paths.py` and `tests/gui/x11_paths.py` | the real window and backends: start, switching, cancelling, "Sound from", the restore token, the desktop ending a share | a GTK display; skips itself without one |
+| `tests/gui/e2e_wayland.py` | the same on a real Wayland desktop: the real share dialog, PipeWire frames, `pactl` | a person; run by hand |
+
+#### GUI tests (automatic)
+
+These start the real app and script it against the fake receiver, with the desktop
+stubbed out: a fake portal for Wayland (no dialog, no PipeWire, no sound server) and a
+test pattern instead of `x11grab` for X11. They need no one at the keyboard.
+
+```
+python -m unittest tests.test_gui -v           # just these (part of the normal run too)
+python -m tests.gui.wayland_paths              # one driver by hand: prints a PASS/FAIL line per check
+python -m tests.gui.x11_paths
+AIRMEDIA_SKIP_GUI_TESTS=1 python -m unittest discover -s tests -t .   # leave them out
+```
+
+- Each driver runs in its own process with a throwaway config and its own application
+  id, so it never touches your settings or an AirMedia Share that is already open.
+- Each opens the app window for about 20 seconds. The window is locked while it runs.
+- They skip themselves when there is no GTK or display, which is why CI (no display)
+  only runs the first layer. The X11 driver also needs Wnck and an X11 display: Xorg,
+  Xvfb, or XWayland (it forces `GDK_BACKEND=x11`).
+- A scenario is a plain generator, where every `yield` waits for something. See
+  `tests/gui/harness.py` for the helpers (`until`, `sleep`, `check`, `enter_code`,
+  `video_flows`) and the existing drivers for examples.
+
+#### Real-desktop check (Wayland, by hand)
+
+`tests/gui/e2e_wayland.py` runs the Wayland backend for real: the desktop's own share
+dialog, PipeWire frames, and `pactl` for "Sound from". The TV is still the fake receiver
+on loopback, so no receiver is needed.
+
+```
+python -m tests.gui.e2e_wayland
+nix-shell --run "python -m tests.gui.e2e_wayland"      # on NixOS
+```
+
+It needs a Wayland session with `xdg-desktop-portal`, and it asks you to answer the
+desktop's dialog. It prints what to do each time:
+
+1. **Entire screen**: the first run asks you to pick a **screen**. The portal's restore
+   token is kept in `~/.cache/airmedia-share/e2e/` (delete that folder to start fresh), so
+   later runs skip this dialog where the desktop allows it (KDE does).
+2. **Choose a screen or window…**: the dialog is limited to **windows**; pick one. To
+   include the "Sound from" checks, pick a window of an app that is playing sound.
+   Without one those checks are reported as `SKIP`, not as failures.
+3. **Back to the screen**: no dialog, then it stops the share.
+
+Leave the app window alone while it runs (it is locked) and only answer the dialog. The
+run ends with `N/N checks passed`, and the exit code is 0 only if every check passed.
+
+#### Trying GNOME in a NixOS VM
+
+`tests/vm/gnome.nix` describes a throwaway NixOS VM with a GNOME Wayland session that signs
+in by itself, shares this checkout as `/repo`, and plays a quiet tone so "Sound from" has an
+app to list. It does not touch your own NixOS configuration. It needs Nix and KVM, and the
+first build downloads about 430 MiB.
+
+```
+nix-build '<nixpkgs/nixos>' -A vm -I nixos-config=$PWD/tests/vm/gnome.nix -o /tmp/airmedia-vm
+NIX_DISK_IMAGE=/tmp/airmedia-vm.qcow2 /tmp/airmedia-vm/bin/run-airmedia-gnome-vm-vm
+```
+
+A window opens with the GNOME desktop (the user is `tester`, password `tester`). To drive it
+from your own terminal instead, build with `AIRMEDIA_VM_SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)"`
+set, and run the tests over ssh (the VM forwards host port 2222), telling them which
+session to use:
+
+```
+ssh -p 2222 tester@localhost 'export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME
+  cd /repo && nix-shell shell.nix --run "python -m tests.gui.e2e_wayland"'
+```
+
+The dialogs appear in the VM's window and you answer them there, as described above. Shut
+the VM down with `sudo poweroff` inside it (or by closing its window). The guest's disk
+keeps the e2e's restore token, so later runs skip the screen dialog.
+
+Not covered by either GUI layer: ending the share from the desktop's own "stop sharing"
+indicator (the automatic Wayland driver simulates the portal's `Closed` notification, but
+clicking the real indicator is a manual check), and a real receiver.
 
 ## Support
 
