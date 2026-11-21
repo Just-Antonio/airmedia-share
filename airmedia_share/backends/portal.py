@@ -59,6 +59,14 @@ def parse_start_results(results):
             tuple(size) if size else None, results.get("restore_token") or None)
 
 
+def source_types(kind):
+    """The SelectSources "types" bits for what the picker may offer.
+
+    "monitor": screens only. "window": windows only. Anything else ("any"): both.
+    """
+    return {"monitor": MONITOR, "window": WINDOW}.get(kind, MONITOR | WINDOW)
+
+
 def _token(prefix="airmedia"):
     return f"{prefix}_{secrets.token_hex(4)}"
 
@@ -177,13 +185,13 @@ class ScreenCast:
     # ----- the flow ----------------------------------------------------------
 
     def select(self, kind, restore_token, on_done):
-        """Ask for a screen ("monitor") or a screen-or-window ("any").
+        """Ask for a screen ("monitor"), a window ("window") or either ("any"): see source_types.
 
         With a restore_token the portal may skip its picker and reuse the earlier
         choice. on_done(stream, error): a PortalStream; or (None, None) if the user
         cancelled; or (None, message) if something failed.
         """
-        types = MONITOR if kind == "monitor" else MONITOR | WINDOW
+        types = source_types(kind)
         modes = (portal_info() or {}).get("cursor_modes", 0)
         cursor = CURSOR_EMBEDDED if modes & CURSOR_EMBEDDED else None
         state = {"session": None}

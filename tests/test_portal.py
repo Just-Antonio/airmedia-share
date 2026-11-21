@@ -13,6 +13,16 @@ class RequestPathTest(unittest.TestCase):
                          "/org/freedesktop/portal/desktop/request/1_5349/airmedia_ab12")
 
 
+class SourceTypesTest(unittest.TestCase):
+    def test_each_kind_offers_what_it_says(self):
+        self.assertEqual(portal.source_types("monitor"), portal.MONITOR)
+        self.assertEqual(portal.source_types("window"), portal.WINDOW)
+        self.assertEqual(portal.source_types("any"), portal.MONITOR | portal.WINDOW)
+
+    def test_unknown_kinds_offer_both(self):
+        self.assertEqual(portal.source_types("anything else"), portal.MONITOR | portal.WINDOW)
+
+
 class StartResultsTest(unittest.TestCase):
     def test_a_monitor(self):
         results = {"streams": [(57, {"source_type": 1, "size": (2560, 1440)})],

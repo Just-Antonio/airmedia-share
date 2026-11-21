@@ -253,6 +253,68 @@ receiver behaviors that were learned the hard way (see
 should fail there first. Bump the pins in `requirements.txt` deliberately, then test
 against a real receiver.
 
+### Tests
+
+There are three layers, from "runs anywhere" to "needs a person at a real desktop":
+
+| Where | What it checks | Needs |
+|---|---|---|
+| `tests/test_*.py` | the protocol against the fake receiver, letterboxing, audio mixing, the portal and PipeWire helpers | nothing; this is what CI runs |
+| `tests/test_gui.py`, which runs `tests/gui/wayland_paths.py` and `tests/gui/x11_paths.py` | the real window and backends: start, switching, cancelling, "Sound from", the restore token, the desktop ending a share | a GTK display; skips itself without one |
+| `tests/gui/e2e_wayland.py` | the same on a real Wayland desktop: the real share dialog, PipeWire frames, `pactl` | a person; run by hand |
+
+#### GUI tests (automatic)
+
+These start the real app and script it against the fake receiver, with the desktop
+stubbed out: a fake portal for Wayland (no dialog, no PipeWire, no sound server) and a
+test pattern instead of `x11grab` for X11. They need no one at the keyboard.
+
+```
+python -m unittest tests.test_gui -v           # just these (part of the normal run too)
+python -m tests.gui.wayland_paths              # one driver by hand: prints a PASS/FAIL line per check
+python -m tests.gui.x11_paths
+AIRMEDIA_SKIP_GUI_TESTS=1 python -m unittest discover -s tests -t .   # leave them out
+```
+
+- Each driver runs in its own process with a throwaway config and its own application
+  id, so it never touches your settings or an AirMedia Share that is already open.
+- Each opens the app window for about 20 seconds. The window is locked while it runs.
+- They skip themselves when there is no GTK or display, which is why CI (no display)
+  only runs the first layer. The X11 driver also needs Wnck and an X11 display: Xorg,
+  Xvfb, or XWayland (it forces `GDK_BACKEND=x11`).
+- A scenario is a plain generator, where every `yield` waits for something. See
+  `tests/gui/harness.py` for the helpers (`until`, `sleep`, `check`, `enter_code`,
+  `video_flows`) and the existing drivers for examples.
+
+#### Real-desktop check (Wayland, by hand)
+
+`tests/gui/e2e_wayland.py` runs the Wayland backend for real: the desktop's own share
+dialog, PipeWire frames, and `pactl` for "Sound from". The TV is still the fake receiver
+on loopback, so no receiver is needed.
+
+```
+python -m tests.gui.e2e_wayland
+nix-shell --run "python -m tests.gui.e2e_wayland"      # on NixOS
+```
+
+It needs a Wayland session with `xdg-desktop-portal`, and it asks you to answer the
+desktop's dialog. It prints what to do each time:
+
+1. **Entire screen**: the first run asks you to pick a **screen**. The portal's restore
+   token is kept in `~/.cache/airmedia-share/e2e/` (delete that folder to start fresh), so
+   later runs skip this dialog where the desktop allows it (KDE does).
+2. **Choose a screen or window…**: the dialog is limited to **windows**; pick one. To
+   include the "Sound from" checks, pick a window of an app that is playing sound.
+   Without one those checks are reported as `SKIP`, not as failures.
+3. **Back to the screen**: no dialog, then it stops the share.
+
+Leave the app window alone while it runs (it is locked) and only answer the dialog. The
+run ends with `N/N checks passed`, and the exit code is 0 only if every check passed.
+
+Not covered by either GUI layer: ending the share from the desktop's own "stop sharing"
+indicator (the automatic Wayland driver simulates the portal's `Closed` notification, but
+clicking the real indicator is a manual check), and a real receiver.
+
 ## Support
 
 This is free and MIT licensed — nothing here is gated behind sponsoring it. If it saved
