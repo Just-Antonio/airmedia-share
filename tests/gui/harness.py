@@ -49,6 +49,7 @@ class Harness:
         self.name, self.lock = name, lock
         self.t0 = time.monotonic()
         self.results, self.skipped = [], 0
+        self._finishing = False
         self.config_dir = config_dir or tempfile.mkdtemp(prefix=f"airmedia-{name}-")
         os.environ.update(env or {})
         os.environ["XDG_CONFIG_HOME"] = os.path.join(self.config_dir, "config")
@@ -106,11 +107,32 @@ class Harness:
         self.say(f"SKIP  {name}  ({reason})")
 
     def finish(self):
+        """Print the summary and end the process, without leaving anything running.
+
+        A share that is still going (a failed check can end the run mid-share) is
+        stopped first, so the app's helper processes (parec, pactl) stop with it instead
+        of being orphaned by os._exit.
+        """
+        if self._finishing:
+            return
+        self._finishing = True
         passed = sum(self.results)
         extra = f", {self.skipped} skipped" if self.skipped else ""
         self.say(f"{passed}/{len(self.results)} checks passed{extra}")
         sys.stdout.flush()
-        os._exit(0 if self.results and all(self.results) else 1)
+        self._code = 0 if self.results and all(self.results) else 1
+        win = self._app.window if getattr(self, "_app", None) else None
+        if win is not None and win.state != "idle":
+            from gi.repository import GLib
+            self._app.stop_sharing()
+            GLib.timeout_add(100, self._exit_when_stopped, time.monotonic())
+        else:
+            os._exit(self._code)
+
+    def _exit_when_stopped(self, since):
+        if self._app.window.state == "idle" or time.monotonic() - since > 10:
+            os._exit(self._code)
+        return True
 
     # ----- waiting (what a scenario yields) ----------------------------------------
 
@@ -166,6 +188,8 @@ class Harness:
             self.finish()
 
     def _tick(self):
+        if self._finishing:
+            return True  # winding down: _exit_when_stopped ends the process
         try:
             win = self._app.window
             if win is None:

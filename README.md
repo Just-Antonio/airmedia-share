@@ -11,8 +11,8 @@ that extension (a WebSocket on port 7300, then WebRTC) using
 Verified with an **AM-3200** (AirMedia Series 3) from **Ubuntu 22.04** on X11.
 
 **Wayland** is supported too, through the desktop's screen-sharing portal. It has been
-tested on **KDE Plasma 6 (NixOS)** against this project's fake receiver, and not yet
-against a real receiver or on GNOME. See [Wayland](#wayland).
+tested on **KDE Plasma 6** and **GNOME 50** (both on NixOS) against this project's fake
+receiver, and not yet against a real receiver. See [Wayland](#wayland).
 
 Not affiliated with or endorsed by Crestron. AirMedia is a Crestron trademark.
 
@@ -166,9 +166,13 @@ That changes a few things compared to X11:
   app shows up in the list once it is playing something.
 - A shared window is called "Selected window" (the desktop doesn't pass titles on).
 
-Tested on KDE Plasma 6 (`xdg-desktop-portal-kde`). GNOME's portal works the same way but
-hasn't been tried. If you try it, a note on what worked is welcome (see
-[issue #2](https://github.com/Just-Antonio/airmedia-share/issues/2)).
+Tested on KDE Plasma 6 (`xdg-desktop-portal-kde`) and on GNOME 50
+(`xdg-desktop-portal-gnome`, in a [VM](#trying-gnome-in-a-nixos-vm)). On both: the
+screen, a window, switching between them, the restore token (the second request for the
+screen needed no dialog) and "Sound from" worked. The GNOME run was a software-rendered
+VM, so its frame rates say little about real hardware, and it was GNOME 50, not the older
+GNOME that Ubuntu LTS releases ship. If you try it elsewhere, a note on what worked is
+welcome (see [issue #2](https://github.com/Just-Antonio/airmedia-share/issues/2)).
 
 ## Troubleshooting
 
@@ -310,6 +314,33 @@ desktop's dialog. It prints what to do each time:
 
 Leave the app window alone while it runs (it is locked) and only answer the dialog. The
 run ends with `N/N checks passed`, and the exit code is 0 only if every check passed.
+
+#### Trying GNOME in a NixOS VM
+
+`tests/vm/gnome.nix` describes a throwaway NixOS VM with a GNOME Wayland session that signs
+in by itself, shares this checkout as `/repo`, and plays a quiet tone so "Sound from" has an
+app to list. It does not touch your own NixOS configuration. It needs Nix and KVM, and the
+first build downloads about 430 MiB.
+
+```
+nix-build '<nixpkgs/nixos>' -A vm -I nixos-config=$PWD/tests/vm/gnome.nix -o /tmp/airmedia-vm
+NIX_DISK_IMAGE=/tmp/airmedia-vm.qcow2 /tmp/airmedia-vm/bin/run-airmedia-gnome-vm-vm
+```
+
+A window opens with the GNOME desktop (the user is `tester`, password `tester`). To drive it
+from your own terminal instead, build with `AIRMEDIA_VM_SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)"`
+set, and run the tests over ssh (the VM forwards host port 2222), telling them which
+session to use:
+
+```
+ssh -p 2222 tester@localhost 'export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME
+  cd /repo && nix-shell shell.nix --run "python -m tests.gui.e2e_wayland"'
+```
+
+The dialogs appear in the VM's window and you answer them there, as described above. Shut
+the VM down with `sudo poweroff` inside it (or by closing its window). The guest's disk
+keeps the e2e's restore token, so later runs skip the screen dialog.
 
 Not covered by either GUI layer: ending the share from the desktop's own "stop sharing"
 indicator (the automatic Wayland driver simulates the portal's `Closed` notification, but
